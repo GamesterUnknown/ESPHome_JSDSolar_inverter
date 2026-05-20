@@ -1,0 +1,1534 @@
+###############################################################################
+# ESPHome configuration for JSD Solar 3KU Inverter – Modbus RTU logger
+# Register source: INV-Modbus地址表3KU（外发）V1.20.xlsx
+#
+# Hardware:  ESP32 + RS485 TTL adapter
+# Inverter:  JSD Solar 3KU (single-phase logic assumed; only Phase A registers)
+# Baud rate: 9600 (default for JSD inverters; adjust if needed)
+# Modbus ID: 1 (default)
+###############################################################################
+
+substitutions:
+  device_name: jsd-solar-inverter
+  friendly_name: "JSD Solar Inverter"
+  modbus_id: "1"            # Modbus device address
+  update_interval: "10s"    # How often to poll sensors
+  update_interval_slow: "60s"  # Energy counters – less frequent
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# ── WiFi ──────────────────────────────────────────────────────────────────────
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${friendly_name} Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+
+# ── API / OTA ─────────────────────────────────────────────────────────────────
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ── Logger ────────────────────────────────────────────────────────────────────
+logger:
+  level: INFO
+  logs:
+    modbus_controller: DEBUG
+    modbus_controller.sensor: WARN
+    modbus_controller.binary_sensor: WARN
+    component: ERROR            # Suppress slow-component warnings
+
+# ── UART (RS-485 adapter) ─────────────────────────────────────────────────────
+uart:
+  id: uart_modbus
+  tx_pin: GPIO17              # Adjust to your wiring
+  rx_pin: GPIO16              # Adjust to your wiring
+  baud_rate: 9600
+  stop_bits: 1
+  parity: NONE
+  data_bits: 8
+  # Uncomment to debug raw bytes:
+  # debug:
+  #   direction: BOTH
+  #   dummy_receiver: false
+
+# ── Modbus ────────────────────────────────────────────────────────────────────
+modbus:
+  id: modbus_bus
+  uart_id: uart_modbus
+  send_wait_time: 250ms
+
+# ── Modbus controller ─────────────────────────────────────────────────────────
+modbus_controller:
+  - id: inverter
+    address: ${modbus_id}
+    modbus_id: modbus_bus
+    setup_priority: -10
+    update_interval: ${update_interval}
+    # Allow one missed poll before marking offline
+    offline_skip_updates: 2
+
+# ===========================================================================
+#  SENSORS
+# ===========================================================================
+sensor:
+
+  # ── Uptime / WiFi diagnostics ──────────────────────────────────────────────
+  - platform: uptime
+    name: "${friendly_name} Uptime"
+
+  - platform: wifi_signal
+    name: "${friendly_name} WiFi Signal"
+    update_interval: 60s
+
+  # ==========================================================================
+  # WF_Simplify block  (registers 0x0040 – 0x009D)
+  # Single-phase single-inverter: Phase-A + Battery + PV summary
+  # ==========================================================================
+
+  # ── Grid / Mains – Phase A ─────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Voltage"
+    id: grid_voltage
+    register_type: holding
+    address: 0x0050         # DEC 80 – Phase A mains voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Current"
+    id: grid_current
+    register_type: holding
+    address: 0x0051         # DEC 81 – Phase A mains current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Frequency"
+    id: grid_frequency
+    register_type: holding
+    address: 0x0052         # DEC 82 – Phase A mains frequency
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Power"
+    id: grid_power
+    register_type: holding
+    address: 0x0053         # DEC 83 – Phase A mains power (signed, 1W)
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── Load / Output – Phase A ───────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Voltage"
+    id: load_voltage
+    register_type: holding
+    address: 0x0058         # DEC 88 – Phase A load voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Current"
+    id: load_current
+    register_type: holding
+    address: 0x0059         # DEC 89 – Phase A load current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Frequency"
+    id: load_frequency
+    register_type: holding
+    address: 0x005A         # DEC 90 – Phase A load frequency
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Active Power"
+    id: load_active_power
+    register_type: holding
+    address: 0x005B         # DEC 91 – Phase A load active power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Apparent Power"
+    id: load_apparent_power
+    register_type: holding
+    address: 0x005C         # DEC 92 – Phase A load apparent power
+    unit_of_measurement: "VA"
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Load Percentage"
+    id: load_percentage
+    register_type: holding
+    address: 0x005D         # DEC 93 – Phase A load percentage
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # ── Battery ────────────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery Voltage"
+    id: battery_voltage
+    register_type: holding
+    address: 0x0080         # DEC 128 – Positive terminal battery voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery Current"
+    id: battery_current
+    register_type: holding
+    address: 0x0081         # DEC 129 – Positive terminal battery current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+    value_type: S_WORD      # signed – positive=charging, negative=discharging
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery SOC"
+    id: battery_soc
+    register_type: holding
+    address: 0x0084         # DEC 132 – Battery capacity percentage
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery Power"
+    id: battery_power
+    register_type: holding
+    address: 0x0085         # DEC 133 – Battery power (signed, 1W)
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── BMS (if connected) ────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Voltage"
+    id: bms_voltage
+    register_type: holding
+    address: 0x0088         # DEC 136 – BMS Battery Voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Current"
+    id: bms_current
+    register_type: holding
+    address: 0x0089         # DEC 137 – BMS Battery Current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS SOC"
+    id: bms_soc
+    register_type: holding
+    address: 0x008A         # DEC 138 – BMS SOC
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Temperature"
+    id: bms_temperature
+    register_type: holding
+    address: 0x008B         # DEC 139 – BMS Temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── Photovoltaic (PV) ─────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Voltage"
+    id: pv1_voltage
+    register_type: holding
+    address: 0x0096         # DEC 150 – Photovoltaic voltage 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Current"
+    id: pv1_current
+    register_type: holding
+    address: 0x0097         # DEC 151 – Photovoltaic 1 current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Power"
+    id: pv1_power
+    register_type: holding
+    address: 0x0098         # DEC 152 – Photovoltaic power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV2 Voltage"
+    id: pv2_voltage
+    register_type: holding
+    address: 0x0099         # DEC 153 – Photovoltaic 2 voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV2 Current"
+    id: pv2_current
+    register_type: holding
+    address: 0x009A         # DEC 154 – Photovoltaic 2 current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV2 Power"
+    id: pv2_power
+    register_type: holding
+    address: 0x009B         # DEC 155 – Photovoltaic 2 power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── PV Energy counters (slower update) ────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Today"
+    id: pv_energy_today
+    register_type: holding
+    address: 0x009C         # DEC 156 – PV power generation today (100Wh)
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.1       # 100Wh → 0.1 kWh per unit
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Total"
+    id: pv_energy_total
+    register_type: holding
+    address: 0x009D         # DEC 157 – Total PV generation (100Wh)
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.1
+    update_interval: ${update_interval_slow}
+
+  # ── Temperatures ──────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Temperature"
+    id: temp_pv
+    register_type: holding
+    address: 0x0330         # DEC 816
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Inverter Temperature"
+    id: temp_inv
+    register_type: holding
+    address: 0x0331         # DEC 817
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Charger Temperature"
+    id: temp_chg
+    register_type: holding
+    address: 0x0332         # DEC 818
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Ambient Temperature"
+    id: temp_ambient
+    register_type: holding
+    address: 0x0334         # DEC 820
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── Fan ───────────────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Fan Speed"
+    id: fan_speed
+    register_type: holding
+    address: 0x0320         # DEC 800
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # ── Output registers (WF_OP) ──────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Voltage"
+    id: output_voltage
+    register_type: holding
+    address: 0x0218         # DEC 536 – A-phase output voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Frequency"
+    id: output_frequency
+    register_type: holding
+    address: 0x0219         # DEC 537 – Phase A output frequency
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Current"
+    id: output_current
+    register_type: holding
+    address: 0x021A         # DEC 538 – Phase A output current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Active Power"
+    id: output_active_power
+    register_type: holding
+    address: 0x021C         # DEC 540 – Phase A output active power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Load Percentage"
+    id: output_load_pct
+    register_type: holding
+    address: 0x0220         # DEC 544 – Phase A load percentage
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # ── WF_PV – detailed PV from dedicated block ──────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Total Voltage"
+    id: pv_total_voltage
+    register_type: holding
+    address: 0x0260         # DEC 608
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Total Power"
+    id: pv_total_power
+    register_type: holding
+    address: 0x0263         # DEC 611 – Total PV power H word (1W, int16)
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── WF_LINE – Phase A mains (detailed block) ────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Line Grid Voltage"
+    id: line_grid_voltage
+    register_type: holding
+    address: 0x01B0         # DEC 432 – Phase A mains voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    value_type: S_WORD
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Line Grid Current"
+    id: line_grid_current
+    register_type: holding
+    address: 0x01B1         # DEC 433 – Phase A mains current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    value_type: S_WORD
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Line Grid Frequency"
+    id: line_grid_frequency
+    register_type: holding
+    address: 0x01B2         # DEC 434 – Phase A mains frequency
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    value_type: S_WORD
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Line Grid Power"
+    id: line_grid_power
+    register_type: holding
+    address: 0x01B3         # DEC 435 – Phase A mains power (10W)
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+    filters:
+      - multiply: 10
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Line Grid Consumption Power"
+    id: line_grid_consumption_power
+    register_type: holding
+    address: 0x01B4         # DEC 436 – Phase A AC consumption power (10W)
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+    filters:
+      - multiply: 10
+
+  # ── WF_LINE – Grid energy counters (32-bit H+L pairs, unit = 10 Wh) ─────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Feed-in Today"
+    id: grid_feedin_today
+    register_type: holding
+    address: 0x01B7         # DEC 439-440
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01       # 10Wh → kWh
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Feed-in Month"
+    id: grid_feedin_month
+    register_type: holding
+    address: 0x01B9         # DEC 441-442
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Feed-in Year"
+    id: grid_feedin_year
+    register_type: holding
+    address: 0x01BB         # DEC 443-444
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Feed-in Total"
+    id: grid_feedin_total
+    register_type: holding
+    address: 0x01BD         # DEC 445-446
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Consumption Today"
+    id: grid_consumption_today
+    register_type: holding
+    address: 0x01BF         # DEC 447-448
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Consumption Month"
+    id: grid_consumption_month
+    register_type: holding
+    address: 0x01C1         # DEC 449-450
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Consumption Year"
+    id: grid_consumption_year
+    register_type: holding
+    address: 0x01C3         # DEC 451-452
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Grid Consumption Total"
+    id: grid_consumption_total
+    register_type: holding
+    address: 0x01C5         # DEC 453-454
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  # ── WF_OP – Output energy counters (32-bit H+L pairs, unit = 10 Wh) ──────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Energy Today"
+    id: output_energy_today
+    register_type: holding
+    address: 0x0221         # DEC 545-546
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Energy Month"
+    id: output_energy_month
+    register_type: holding
+    address: 0x0223         # DEC 547-548
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Energy Year"
+    id: output_energy_year
+    register_type: holding
+    address: 0x0225         # DEC 549-550
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Energy Total"
+    id: output_energy_total
+    register_type: holding
+    address: 0x0227         # DEC 551-552
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  # ── WF_PV – Total PV current & power (additional) ─────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Total Current"
+    id: pv_total_current
+    register_type: holding
+    address: 0x0261         # DEC 609-610 – Total PV current (32-bit)
+    register_count: 2
+    value_type: S_DWORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Total Tracking Status"
+    id: pv_total_tracking_status
+    register_type: holding
+    address: 0x0265         # DEC 613 – Total solar tracking status
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Total Rechargeable State"
+    id: pv_total_rechargeable_state
+    register_type: holding
+    address: 0x0266         # DEC 614 – Total PV rechargeable state
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  # ── WF_PV – Total PV energy counters (32-bit, 10 Wh) ─────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Today Total"
+    id: pv_energy_today_total
+    register_type: holding
+    address: 0x0267         # DEC 615-616
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Month Total"
+    id: pv_energy_month_total
+    register_type: holding
+    address: 0x0269         # DEC 617-618
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Year Total"
+    id: pv_energy_year_total
+    register_type: holding
+    address: 0x026B         # DEC 619-620
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV Energy Total All Time"
+    id: pv_energy_all_total
+    register_type: holding
+    address: 0x026D         # DEC 621-622
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  # ── WF_PV – PV1 detailed block ────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Tracking Status"
+    id: pv1_tracking_status
+    register_type: holding
+    address: 0x0273         # DEC 627
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Rechargeable State"
+    id: pv1_rechargeable_state
+    register_type: holding
+    address: 0x0274         # DEC 628
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Energy Today"
+    id: pv1_energy_today
+    register_type: holding
+    address: 0x0275         # DEC 629-630
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Energy Month"
+    id: pv1_energy_month
+    register_type: holding
+    address: 0x0277         # DEC 631-632
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Energy Year"
+    id: pv1_energy_year
+    register_type: holding
+    address: 0x0279         # DEC 633-634
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PV1 Energy Total"
+    id: pv1_energy_total
+    register_type: holding
+    address: 0x027B         # DEC 635-636
+    register_count: 2
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+    update_interval: ${update_interval_slow}
+
+  # ── WF_Simplify – Additional registers ────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Software Version"
+    id: sw_version
+    register_type: holding
+    address: 0x0040         # DEC 64 – High 8-bit major, low 8-bit minor version
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery Negative Voltage"
+    id: battery_neg_voltage
+    register_type: holding
+    address: 0x0082         # DEC 130 – Negative terminal battery voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    value_type: S_WORD
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Battery Negative Current"
+    id: battery_neg_current
+    register_type: holding
+    address: 0x0083         # DEC 131 – Negative terminal battery current
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 1
+    value_type: S_WORD
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS CV Point"
+    id: bms_cv_point
+    register_type: holding
+    address: 0x008C         # DEC 140 – BMS constant pressure (CV) point
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Rated Capacity"
+    id: bms_rated_capacity
+    register_type: holding
+    address: 0x008D         # DEC 141 – Rated battery capacity (100mAh units)
+    unit_of_measurement: "Ah"
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Current Capacity"
+    id: bms_current_capacity
+    register_type: holding
+    address: 0x008E         # DEC 142 – Current battery capacity (100mAh units)
+    unit_of_measurement: "Ah"
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Network Status"
+    id: bms_network_status
+    register_type: holding
+    address: 0x0090         # DEC 144 – Lithium battery network status
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Failure Code"
+    id: bms_failure_code
+    register_type: holding
+    address: 0x0091         # DEC 145 – BMS failure code
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Alarm Code"
+    id: bms_alarm_code
+    register_type: holding
+    address: 0x0092         # DEC 146 – BMS alarm code
+    unit_of_measurement: ""
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # ── WF_NTC – Extra temperatures ────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} CHG2 Temperature"
+    id: temp_chg2
+    register_type: holding
+    address: 0x0333         # DEC 819 – CHG2 temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Discharge Temperature"
+    id: temp_dis_chg
+    register_type: holding
+    address: 0x0335         # DEC 821 – DIS_CHG temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    value_type: S_WORD
+
+# ===========================================================================
+#  TEXT SENSORS  – status / fault codes
+# ===========================================================================
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "${friendly_name} IP Address"
+
+  # ── Startup-only: SN code (read once, 10 registers = 20 bytes ASCII) ─────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} SN Code"
+    id: sn_code
+    register_type: holding
+    address: 0x0000         # DEC 0-9 – Serial Number (20 bytes)
+    register_count: 10
+    response_size: 20
+    raw_encode: ANSI
+    update_interval: 24h
+
+  # ── Startup-only: Version registers ─────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Version"
+    id: protocol_version
+    register_type: holding
+    address: 0x0010         # DEC 16-17 – Protocol version H+L (2 regs = 4 bytes)
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power Board HW Version"
+    id: power_board_hw_version
+    register_type: holding
+    address: 0x0012         # DEC 18-19
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control Board HW Version"
+    id: control_board_hw_version
+    register_type: holding
+    address: 0x0014         # DEC 20-21
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} HMI HW Version"
+    id: hmi_hw_version
+    register_type: holding
+    address: 0x0016         # DEC 22-23 – Centralized control HW version H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power Board SW Version"
+    id: power_board_sw_version
+    register_type: holding
+    address: 0x0018         # DEC 24-25
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control Board SW Version"
+    id: control_board_sw_version
+    register_type: holding
+    address: 0x001A         # DEC 26-27
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} HMI SW Version"
+    id: hmi_sw_version
+    register_type: holding
+    address: 0x001C         # DEC 28-29 – Centralized control SW version H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Version Time"
+    id: version_time
+    register_type: holding
+    address: 0x001E         # DEC 30-31 – Version Time H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} CheckSum"
+    id: checksum_ver
+    register_type: holding
+    address: 0x0020         # DEC 32-33 – Checksum H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PC Protocol Version"
+    id: pc_protocol_version
+    register_type: holding
+    address: 0x0022         # DEC 34 – PC communication protocol version
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} WiFi Protocol Version"
+    id: wifi_protocol_version
+    register_type: holding
+    address: 0x0023         # DEC 35 – WiFi communication protocol version
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Protocol Version"
+    id: bms_protocol_version
+    register_type: holding
+    address: 0x0024         # DEC 36 – BMS communication protocol version
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Parallel Protocol Version"
+    id: parallel_protocol_version
+    register_type: holding
+    address: 0x0025         # DEC 37 – Parallel communication protocol version
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier A"
+    id: protocol_id_a
+    register_type: holding
+    address: 0x0038         # DEC 56 – Compatible customers ID
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier B"
+    id: protocol_id_b
+    register_type: holding
+    address: 0x0039         # DEC 57 – Compatible models ID
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier C"
+    id: protocol_id_c
+    register_type: holding
+    address: 0x003A         # DEC 58
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier D"
+    id: protocol_id_d
+    register_type: holding
+    address: 0x003B         # DEC 59
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Device Type"
+    id: device_type
+    register_type: holding
+    address: 0x003C         # DEC 60-61 – Device type H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Company Information"
+    id: company_information
+    register_type: holding
+    address: 0x003E         # DEC 62-63 – Company info H+L
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    update_interval: 24h
+
+  # ── WF_Simplify – BMS connection & parallel status ────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Connection Status"
+    id: bms_connection_status
+    register_type: holding
+    address: 0x0041         # DEC 65 – 0:searching 1:CAN 2:UART 3:remote
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Parallel Operation Status"
+    id: parallel_operation_status
+    register_type: holding
+    address: 0x0045         # DEC 69 – Parallel operation
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+
+  # ── WF_OP – Output priority / operating mode ──────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Output Priority"
+    id: output_priority
+    register_type: holding
+    address: 0x0210         # DEC 528 – 0:GPB 1:PGB 2:PBG 3:MKS
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Operating Mode"
+    id: operating_mode
+    register_type: holding
+    address: 0x0211         # DEC 529 – 0:APP 1:UPS 2:GEN
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+
+  # ── Inverter state machine ────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} State"
+    id: inverter_state
+    register_type: holding
+    address: 0x0042         # DEC 66 – State machine states
+    raw_encode: HEXBYTES
+    # Map values in HA template / filters if needed
+
+  # ── Energy terminal status ────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Energy Terminal Status"
+    id: energy_terminal_status
+    register_type: holding
+    address: 0x0043         # DEC 67
+    raw_encode: HEXBYTES
+
+  # ── Energy flow ───────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Energy Flow"
+    id: energy_flow
+    register_type: holding
+    address: 0x0044         # DEC 68
+    raw_encode: HEXBYTES
+
+  # ── Fault codes ───────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Fault Code 1"
+    id: fault_code_1
+    register_type: holding
+    address: 0x0046         # DEC 70
+    raw_encode: HEXBYTES
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Fault Code 2"
+    id: fault_code_2
+    register_type: holding
+    address: 0x0047         # DEC 71
+    raw_encode: HEXBYTES
+
+  # ── Alarm codes ───────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Alarm Code 1"
+    id: alarm_code_1
+    register_type: holding
+    address: 0x0048         # DEC 72
+    raw_encode: HEXBYTES
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Alarm Code 2"
+    id: alarm_code_2
+    register_type: holding
+    address: 0x0049         # DEC 73
+    raw_encode: HEXBYTES
+
+# ===========================================================================
+#  BINARY SENSORS – derived from alarm / fault registers
+# ===========================================================================
+binary_sensor:
+  - platform: status
+    name: "${friendly_name} Online"
+
+  # Fan fault: non-zero Fan Status register
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Fan Fault"
+    id: fan_fault
+    register_type: holding
+    address: 0x0321         # DEC 801 – Fan status (0=OK)
+    bitmask: 0xFFFF
+
+  # BMS connected: communication status != 0
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS Connected"
+    id: bms_connected
+    register_type: holding
+    address: 0x008F         # DEC 143 – BMS communication status
+    bitmask: 0xFFFF

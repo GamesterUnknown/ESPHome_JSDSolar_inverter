@@ -1,0 +1,275 @@
+# ==========================================================================
+
+# WF_Version block (registers 16-37, 56-63) - Read once on startup
+
+# ==========================================================================
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol version H"
+    id: protocol_version_h
+    register_type: holding
+    address: 0x0010
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol version L"
+    id: protocol_version_l
+    register_type: holding
+    address: 0x0011
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power board hardware version H"
+    id: power_board_hardware_version_h
+    register_type: holding
+    address: 0x0012
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power board hardware version L"
+    id: power_board_hardware_version_l
+    register_type: holding
+    address: 0x0013
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control board hardware version H"
+    id: control_board_hardware_version_h
+    register_type: holding
+    address: 0x0014
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control board hardware version L"
+    id: control_board_hardware_version_l
+    register_type: holding
+    address: 0x0015
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Centralized control version hardware version H"
+    id: centralized_control_version_hardware_version_h
+    register_type: holding
+    address: 0x0016
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Centralized control version hardware version L"
+    id: centralized_control_version_hardware_version_l
+    register_type: holding
+    address: 0x0017
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power board software version H"
+    id: power_board_software_version_h
+    register_type: holding
+    address: 0x0018
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Power board software version L"
+    id: power_board_software_version_l
+    register_type: holding
+    address: 0x0019
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control board software version H"
+    id: control_board_software_version_h
+    register_type: holding
+    address: 0x001A
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Control board software version L"
+    id: control_board_software_version_l
+    register_type: holding
+    address: 0x001B
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Centralized control software version H"
+    id: centralized_control_software_version_h
+    register_type: holding
+    address: 0x001C
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Centralized control software version L"
+    id: centralized_control_software_version_l
+    register_type: holding
+    address: 0x001D
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Version Time H"
+    id: version_time_h
+    register_type: holding
+    address: 0x001E
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Version Time L"
+    id: version_time_l
+    register_type: holding
+    address: 0x001F
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} CheckSum H"
+    id: checksum_h
+    register_type: holding
+    address: 0x0020
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} CheckSum L"
+    id: checksum_l
+    register_type: holding
+    address: 0x0021
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} PC communication protocol version"
+    id: pc_communication_protocol_version
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} WiFi communication protocol version"
+    id: wifi_communication_protocol_version
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} BMS communication protocol version"
+    id: bms_communication_protocol_version
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Parallel communication protocol version"
+    id: parallel_communication_protocol_version
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier A"
+    id: protocol_identifier_a
+    register_type: holding
+    address: 0x0038
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier B"
+    id: protocol_identifier_b
+    register_type: holding
+    address: 0x0039
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier C"
+    id: protocol_identifier_c
+    register_type: holding
+    address: 0x003A
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Protocol Identifier D"
+    id: protocol_identifier_d
+    register_type: holding
+    address: 0x003B
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Device Type H"
+    id: device_type_h
+    register_type: holding
+    address: 0x003C
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Equipment type L"
+    id: equipment_type_l
+    register_type: holding
+    address: 0x003D
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Company Information H"
+    id: company_information_h
+    register_type: holding
+    address: 0x003E
+    value_type: U_WORD
+    update_interval: 24h
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} Company Information L"
+    id: company_information_l
+    register_type: holding
+    address: 0x003F
+    value_type: U_WORD
+    update_interval: 24h
