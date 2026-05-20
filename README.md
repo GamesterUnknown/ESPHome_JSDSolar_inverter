@@ -1,61 +1,29 @@
 # My ESPHome PowMr Hybrid Inverter
-This is modifiyed updated version of ESPHome PowMr Hybrid Inverter(https://github.com/odya/esphome-powmr-hybrid-inverter).
+ESPHome configuration for JSD Solar Inverter – Modbus RTU logger
+Register source: docs\INV-Modbus地址表3KU（外发）V1.20.xlsx or docs\registers-map.md
 
-What was changed:
-1. All sensors combined in one file. 
-2. Corrected query and calculation of Power and Power Factor
-3. Optimied Modbus registers query:
-   1. 14 registers starting from 4502
-   2. 19 registers starting from 4516
-   3. 19 registers starting from 4539
-   4. config registers (starting from 5002) are read one by one in other case it will not read values.
-
-Known issues:
- 1. Using text_sensor instead of regular sensor lead to hang of ESP immidiatly after start. Root case unknown.
- 2. In some cases ESP hang after otp update via WiFI.
 
 ## Compatibility
-All models that are supported by the [**WIFI-VM**](https://powmr.com/products/powmr-wifi-module-with-rs232-remote-monitoring-solution-wifi-vm) device should work:
 
-- [**POW-HVM1.5H-12V**](https://powmr.com/products/all-in-one-inverter-charger-1500watt-220vac-12vdc)
-- **POW-HVM2.0H-12V**
-- [**POW-HVM2.4H-24V**](https://web.archive.org/web/20230329235125/https://powmr.com/inverters/all-in-one-inverter-chargers/powmr-2400watt-dc-24v-ac-220v-solar-inverter-charger)
-- [**POW-HVM3.2H-24V**](https://powmr.com/products/all-in-one-inverter-charger-3000w-220vac-24vdc)
-- [**POW-HVM3.6M-24V**](https://powmr.com/products/hybrid-inverter-charger-3600w-220vac-24vdc)
-- [**POW-HVM4.2M-24V**](https://powmr.com/products/hybrid-inverter-charger-4200w-220vac-24vdc)
-- [**POW-HVM6.2M-48V**](https://powmr.com/products/hybrid-inverter-charger-6200w-220vac-48vdc)
-- [**POW-HVM8.2M**](https://powmr.com/products/hybrid-inverter-charger-8000w-220vac-48vdc)
-- [**POW-HVM10.2M**](https://powmr.com/products/hybrid-inverter-charger-10200w-200vac-48vdc)
+
 
 ### Tested models
 
-- **POW-HVM3.2H-24V**
-- **POW-HVM6.2M-48V**
-
 ## Connection
-![PowMr ESP32 connection diagram](images/powmr_esp32_connection.png "PowMr ESP32 connection diagram")
+use 
 
-## ESP8266
-This configuration can be used on the ESP8266, but you won't be able to use all the sensors due to the memory limitations of the ESP8266. 
-You can use minimal set of sensors/selects, leaving only the ones you need. You can use "Heap size" sensor of Debug module to determine how much free memory left. 
-Looks like minimum heap size, that ensures stability, is near 6Kb. Although I still strongly recommend using ESP32.
-Also Ota upgrade might be failed due to absent of EEPROM memory for downloading update. In such case use USB or WEB firmare update.
 
 ## Usage
-1) Create new project subdirectory within your ESPHome configuration directory (let it be `powmr-inverter`, for example) 
-2) Copy the contents of the `src` repo folder to a newly created project directory.
-3) Now, the `main.yaml` file must be located under `<esphome_config>/powmr-inverter`
-4) Create file `powmr-inverter.yaml` in the esphome config directory root and copy contents of [example config](/examples/powmr-inverter.yaml)
-5) Edit substitutions & customize `powmr-inverter.yaml`. You can add contents of [common_system](/examples/common_system.yaml) & [common_sensors](/examples/common_sensors.yaml) to this file or include them separately following the example.
-6) Flash firmware to your ESP32
+1) Create new ESPHome device, within your ESPHome (let it be `my-inverter`, for example) 
+2) Copy the contents of the `jsd-solar-inverter.yaml`  to a config file of newly created deivce.
+3) Please be sure that all secret variables defined in `jsd-solar-inverter.yaml` are present in your `secrets.yaml`. if something is missed, it should be added. Please use `secrets.yaml.template` as an example of `secrets.yaml`
+4) chose proper TX, RX pins for your UART, Review and comment sensors that are not needed.
+5) Flash firmware to your ESP32-S3
 
-
-## PZEM module
-In version 1.2, a [PZEM](https://esphome.io/components/sensor/pzem004t) module was added for measuring parameters of the input AC grid. If you do not wish to use it, comment out the include of the corresponding module in the [main.yaml](/src/main.yaml) file.
 
 ## Inverter card
 For easy integration into Home Assistant, you can use the examples of inverter cards. 
-The following custom plugins are required: [sunsynk-power-flow-card](https://github.com/slipx06/sunsynk-power-flow-card), [stack-in-card](https://github.com/custom-cards/stack-in-card), [tabbed-card](https://github.com/kinghat/tabbed-card), [canary](https://github.com/jcwillox/lovelace-canary).
+The following custom plugins are required: [sunsynk-power-flow-card](https://github.com/slipx06/sunsynk-power-flow-card), [stack-in-card](https://github.com/custom-cards/stack-in-card).
 
 ## Optimize modbus communications
 ESPHome reads sequential Modbus registers in one batch. If you have gaps in register addresses, you need to use the `register_count` parameter to skip N registers and continue the batch.
@@ -106,20 +74,4 @@ You will see gaps in register ranges map. To calculate `register_count`, you nee
   ```
 
 ## Notes
-- Registers map: [registers-map.md](docs/registers-map.md)
-- Read registers are using little-endian format that doesn't have a native support in ESPHome, so we need a custom function to swap bytes.
-- Inverter UART pins (TX2 & RX2) are swapped https://github.com/odya/esphome-powmr-hybrid-inverter/issues/25
-- Manuals:
-  - [POW-HVM1.5H-12V](docs/POW-HVM2.4H-24V.pdf)
-  - [POW-HVM2.4H-24V](docs/POW-HVM2.4H-24V.pdf)
-  - [POW-HVM2.0H-12V](docs/POW-HVM3.2H-24V.pdf)
-  - [POW-HVM3.2H-24V](docs/POW-HVM3.2H-24V.pdf)
-  - [POW-HVM10.2M](docs/POW-HVM10.2M.pdf)
-
-## References & thanks
-- https://github.com/odya/esphome-powmr-hybrid-inverter
-  This is a source project.
-- https://github.com/leodesigner/powmr_comm 
-  Great research on PowMr registers and C++ firmware code with MQTT. Thanks to author, it helps me a lot.
-- https://github.com/syssi/esphome-smg-ii
-  ESPHome project to monitor and control a ISolar/EASUN SMG II inverter via RS232
+- Registers map: [registers-map.md](docs\INV-Modbus地址表3KU（外发）V1.20.xlsx)

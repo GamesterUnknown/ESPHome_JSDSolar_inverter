@@ -2,7 +2,7 @@
 # ESPHome configuration for JSD Solar 3KU Inverter – Modbus RTU logger
 # Register source: INV-Modbus地址表3KU（外发）V1.20.xlsx
 #
-# Hardware:  ESP32 + RS485 TTL adapter
+# Hardware:  ESP32 + RS232 TTL adapter
 # Inverter:  JSD Solar 3KU (single-phase logic assumed; only Phase A registers)
 # Baud rate: 9600 (default for JSD inverters; adjust if needed)
 # Modbus ID: 1 (default)
@@ -20,9 +20,9 @@ esphome:
   friendly_name: ${friendly_name}
 
 esp32:
-  board: esp32dev
+  board: esp32-s3-devkitc-1
   framework:
-    type: arduino
+    type: esp-idf
 
 # ── WiFi ──────────────────────────────────────────────────────────────────────
 wifi:
@@ -52,11 +52,11 @@ logger:
     modbus_controller.binary_sensor: WARN
     component: ERROR            # Suppress slow-component warnings
 
-# ── UART (RS-485 adapter) ─────────────────────────────────────────────────────
+# ── UART (RS-232 adapter) ─────────────────────────────────────────────────────
 uart:
   id: uart_modbus
-  tx_pin: GPIO17              # Adjust to your wiring
-  rx_pin: GPIO16              # Adjust to your wiring
+  tx_pin: GPIO17  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO39 as TX
+  rx_pin: GPIO16  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO38 as RX
   baud_rate: 9600
   stop_bits: 1
   parity: NONE

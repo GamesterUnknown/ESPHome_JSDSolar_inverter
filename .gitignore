@@ -1,0 +1,4 @@
+*.py
+/scratch/
+scratch*
+.gitignore
