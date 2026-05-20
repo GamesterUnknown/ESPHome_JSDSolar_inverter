@@ -68,7 +68,7 @@ web_server:
 
 # ── Logger ────────────────────────────────────────────────────────────────────
 logger:
-  level: VERBOSE #DEBUG # VERBOSE / DEBUG / INFO / WARN
+  level: INFO # VERBOSE / DEBUG / INFO / WARN
   id: uart_logger
   baud_rate: 0
   logs:
@@ -79,11 +79,11 @@ logger:
     text_sensor: INFO
     binary_sensor: INFO
     number: INFO
-    modbus_controller: VERBOSE
+    modbus_controller: INFO
     modbus_controller.sensor: WARN
     modbus_controller.binary_sensor: WARN
     component: ERROR            # Suppress slow-component warnings
-    uart: DEBUG
+    uart: INFO
 
 # ── UART (RS-232 adapter) ─────────────────────────────────────────────────────
 uart:
