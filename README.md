@@ -4,13 +4,39 @@ Register source: docs\INV-Modbus地址表3KU（外发）V1.20.xlsx or docs\regis
 
 
 ## Compatibility
-
-
+JSDSolar Hybrid Inverter j12000HC-48 12kW 48V
+Anern Solar Inverter AN-FGI-S12000 12kW 48V
+Anern Solar Inverter AN-FGI-S6500 6.5kW 48V
+Anern Solar Inverter AN-FGI-P6500 6.5kW 48V
+Anern Solar Inverter AN-FGI-P5000 5kW 24V
+ECGSolax Hybrid Solar Inverter ECG-HVM6.5KP-48V
 
 ### Tested models
 
 ## Connection
-use 
+1) Use ESP32-S3 connected via RS232 comverter pluged into "USB" port of inverter (marked as COMM or WIFI). Ensure 3.3v from ESP32-S3 is connected to 3.3v pin of the RS232 converter. 
+Please check pinout and DC voltage on "USB" port before connecting ESP32-S3. The DC voltage on this port is 5V or 12V depending on the model, which can damage ESP32-S3. So DC-DC converter like 360mini should be used to step down the voltage to 3.3V. Please double check the pinout of the converter before connecting to ESP32-S3.
+Inverter Models with internal wifi loger do not have DC voltage on "USB" port. In this case you need to modify inverter communication board.
+
+2) Inverter Models with internal wifi loger use WT32-S3-Wrover modules connected internally, you can flash it instead of  external ESP32-S3. it is recomended to dump original firmware prior to flashing ESPHome firmware. 
+there are 2 connectors on T32-S3-Wrover logger board:
+CN7900- HY2.0 6PIN - for upload firmware
+1-VCC 3.3V
+2-GND
+3-EN
+4-TX
+5-RX
+6-GPIO0 (it is needed to put high to start flash wirmware)
+
+CN7901- HY2.0 5PIN - for serial comunications with invertor TTL level signals
+1-GPIO39 as a TX
+2-GPIO38 as a RX
+3-VCC 3.3V
+4-EN
+5-GND
+
+
+3) Also it is possible to connect ESP32-S3 instead of WT32-S3-Wrover directly see pinouts of CN7901 for proper connection. No need to use RS232 and DC-DC comverter in that case. for inverters without internal logger you need to modify the communication board.
 
 
 ## Usage
