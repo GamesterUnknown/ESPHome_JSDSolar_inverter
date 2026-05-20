@@ -1,6 +1,6 @@
 # ESPHome configuration for JSD Solar Inverter – Modbus RTU logger
 
-![EJSDSolar Hybrid Inverter j12000HC-48 12kW 48V](pics\inverter.jpg) ![EJSDSolar Hybrid Inverter j12000HC-48 12kW 48V inside](pics\inverter2.jpg)
+![EJSDSolar Hybrid Inverter j12000HC-48 12kW 48V](pics/inverter.jpg) ![EJSDSolar Hybrid Inverter j12000HC-48 12kW 48V inside](pics/inverter2.jpg)
 
 
 ## Compatibility
@@ -17,8 +17,8 @@
 1) Use ESP32-S3 connected via RS232 comverter pluged into "USB" port of inverter (marked as COMM or WIFI). Ensure 3.3v from ESP32-S3 is connected to 3.3v pin of the RS232 converter. 
 Please check pinout and DC voltage on "USB" port before connecting ESP32-S3. The DC voltage on this port is 5V or 12V depending on the model, which can damage ESP32-S3. So DC-DC converter like 360mini should be used to step down the voltage to 3.3V. Please double check the pinout of the converter before connecting to ESP32-S3.
 Inverter Models with internal wifi loger do not have DC voltage on "USB" port. In this case you need to modify inverter communication board. 
-![Communication board without logger](pics\com_board_no_internal_loger.jpg)  
-![Communication board with logger](pics\com_board_with_internal_loger.jpg)  
+![Communication board without logger](pics/com_board_no_internal_loger.jpg)  
+![Communication board with logger](pics/com_board_with_internal_loger.jpg)  
 
 2) Inverter Models with internal wifi loger use WT32-S3-Wrover modules connected internally, you can flash it instead of  external ESP32-S3. it is recomended to dump original firmware prior to flashing ESPHome firmware. 
 there are 2 connectors on T32-S3-Wrover logger board:
@@ -38,7 +38,7 @@ there are 2 connectors on T32-S3-Wrover logger board:
   - 4-EN
   - 5-GND
 
-![WT32-S3-Wrover internal logger](pics\internal_loger.jpg)  
+![WT32-S3-Wrover internal logger](pics/internal_loger.jpg)  
 
 3) Also it is possible to connect ESP32-S3 instead of WT32-S3-Wrover directly see pinouts of CN7901 for proper connection. No need to use RS232 and DC-DC comverter in that case. for inverters without internal logger you need to modify the communication board.
 
@@ -86,5 +86,5 @@ logger:
   ```
 
 ## Notes
-- Registers map: [registers-map.md](docs\registers-map.md )
-- Excel source: [INV-Modbus地址表3KU（外发）V1.20.xlsx](docs\INV-Modbus地址表3KU（外发）V1.20.xlsx)  
+- Registers map: [registers-map.md](docs/registers-map.md )
+- Excel source: [INV-Modbus地址表3KU（外发）V1.20.xlsx](docs/INV-Modbus地址表3KU（外发）V1.20.xlsx)  
