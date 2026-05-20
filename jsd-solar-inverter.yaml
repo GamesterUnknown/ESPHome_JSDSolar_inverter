@@ -9,11 +9,20 @@
 ###############################################################################
 
 substitutions:
-  device_name: jsd-solar-inverter
-  friendly_name: "JSD Solar Inverter"
+  device_name: "jsdsolar"
+  friendly_name: "JSDSolar Inverter"
+  device_description: "JSDSolar Inverter 12kW"
   modbus_id: "1"            # Modbus device address
   update_interval: "10s"    # How often to poll sensors
-  update_interval_slow: "60s"  # Energy counters – less frequent
+  skip_times: 6  # Energy counters – less frequent
+  skip_times2: 360
+  safe_mode_delay: "60s"
+
+  func_int_to_time: |-
+    uint8_t hours = raw / 100;
+    uint8_t minutes = raw - (hours * 100);
+    return ESPTime {.minute = minutes, .hour = hours};
+  func_time_to_int: "return x.hour * 100 + x.minute;"
 
 esphome:
   name: ${device_name}
@@ -38,29 +47,62 @@ captive_portal:
 api:
   encryption:
     key: !secret api_encryption_key
+  on_client_disconnected:
+    - delay: ${safe_mode_delay}
+    - if:
+        condition:
+          not: api.connected
+        then:
+          - logger.log: "Lost connection to HomeAssistant API - Activating safe mode"
+  on_client_connected:
+    - logger.log: "Connection to HomeAssistant API restored"
 
 ota:
   - platform: esphome
     password: !secret ota_password
 
+web_server:
+ port: 80
+ local: true
+#  ota: false
+
 # ── Logger ────────────────────────────────────────────────────────────────────
 logger:
-  level: INFO
+  level: VERBOSE #DEBUG # VERBOSE / DEBUG / INFO / WARN
+  id: uart_logger
+  baud_rate: 0
   logs:
-    modbus_controller: DEBUG
+#    esp32_ble_tracker: INFO
+#    esp32_ble_client: INFO
+#    jk_bms_ble: INFO
+    sensor: INFO
+    text_sensor: INFO
+    binary_sensor: INFO
+    number: INFO
+    modbus_controller: VERBOSE
     modbus_controller.sensor: WARN
     modbus_controller.binary_sensor: WARN
     component: ERROR            # Suppress slow-component warnings
+    uart: DEBUG
 
 # ── UART (RS-232 adapter) ─────────────────────────────────────────────────────
 uart:
   id: uart_modbus
-  tx_pin: GPIO17  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO39 as TX
-  rx_pin: GPIO16  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO38 as RX
+  tx_pin: GPIO43 #GPIO17  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO39 as TX
+  rx_pin: GPIO44 #GPIO16  # Adjust to your wiring. Original internal loger WT32-S3 use GPIO38 as RX
   baud_rate: 9600
   stop_bits: 1
   parity: NONE
   data_bits: 8
+  debug:
+     direction: BOTH
+     dummy_receiver: false
+     after:
+ #     delimiter: "\n"
+      timeout: 5ms
+ #    sequence:
+ #     - lambda: UARTDebug::log_string(direction, bytes);
+
   # Uncomment to debug raw bytes:
   # debug:
   #   direction: BOTH
@@ -80,7 +122,7 @@ modbus_controller:
     setup_priority: -10
     update_interval: ${update_interval}
     # Allow one missed poll before marking offline
-    offline_skip_updates: 2
+    offline_skip_updates: 5
 
 # ===========================================================================
 #  SENSORS
@@ -419,9 +461,10 @@ sensor:
     device_class: energy
     state_class: total_increasing
     accuracy_decimals: 2
+    skip_updates: ${skip_times}
     filters:
       - multiply: 0.1       # 100Wh → 0.1 kWh per unit
-    update_interval: ${update_interval_slow}
+    
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -433,9 +476,10 @@ sensor:
     device_class: energy
     state_class: total_increasing
     accuracy_decimals: 2
+    skip_updates: ${skip_times}
     filters:
       - multiply: 0.1
-    update_interval: ${update_interval_slow}
+
 
   # ── Temperatures ──────────────────────────────────────────────────────────
   - platform: modbus_controller
@@ -673,7 +717,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01       # 10Wh → kWh
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -689,7 +733,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -705,7 +749,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -721,7 +765,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -737,7 +781,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -753,7 +797,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -769,7 +813,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -785,7 +829,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   # ── WF_OP – Output energy counters (32-bit H+L pairs, unit = 10 Wh) ──────────
   - platform: modbus_controller
@@ -802,7 +846,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -818,7 +862,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -834,7 +878,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -850,7 +894,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   # ── WF_PV – Total PV current & power (additional) ─────────────────────────────
   - platform: modbus_controller
@@ -905,7 +949,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -921,7 +965,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -937,7 +981,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -953,7 +997,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   # ── WF_PV – PV1 detailed block ────────────────────────────────────────────────
   - platform: modbus_controller
@@ -992,7 +1036,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1008,7 +1052,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1024,7 +1068,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1040,7 +1084,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    update_interval: ${update_interval_slow}
+    skip_updates: ${skip_times}
 
   # ── WF_Simplify – Additional registers ────────────────────────────────────────
   - platform: modbus_controller
@@ -1052,7 +1096,7 @@ sensor:
     unit_of_measurement: ""
     state_class: measurement
     accuracy_decimals: 0
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1192,7 +1236,7 @@ text_sensor:
     register_count: 10
     response_size: 20
     raw_encode: ANSI
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   # ── Startup-only: Version registers ─────────────────────────────────────────
   - platform: modbus_controller
@@ -1204,7 +1248,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1215,7 +1259,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1226,7 +1270,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1237,7 +1281,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1248,7 +1292,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1259,7 +1303,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1270,7 +1314,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1281,7 +1325,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1292,7 +1336,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1303,7 +1347,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1314,7 +1358,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1325,7 +1369,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1336,7 +1380,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1347,7 +1391,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1358,7 +1402,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1369,7 +1413,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1380,7 +1424,7 @@ text_sensor:
     register_count: 1
     response_size: 2
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1391,7 +1435,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1402,7 +1446,7 @@ text_sensor:
     register_count: 2
     response_size: 4
     raw_encode: HEXBYTES
-    update_interval: 24h
+    skip_updates: ${skip_times2}
 
   # ── WF_Simplify – BMS connection & parallel status ────────────────────────────
   - platform: modbus_controller
