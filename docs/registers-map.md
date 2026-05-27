@@ -6,7 +6,7 @@
 >
 > **Колонка Initial Loger query:** позначає регістри, які логер запитує при запуску (за даними стартового лога)  
 > **Колонка Regular Loger query:** позначає регістри, які логер запитує у штатному циклі роботи (за даними uart_debug лога)  
-> **Колонка ✅:** позначає регістри, для яких вже створено сенсор у `jsd-solar-inverter.yaml`
+> **Колонка My Loger query:** позначає регістри, для яких вже створено сенсор у `jsd-solar-inverter.yaml`
 
 ## Зміст
 
@@ -81,7 +81,7 @@
 
 ### WF_Version
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ | ✅ | ✅ | `0x0000` | 0 | Version status debugging address set |  |  |  |  |
 | ✅ | ✅ | ✅ | `0x0000` | 0 | SN code | uint16_t |  | Reading and writing |  |
@@ -153,7 +153,7 @@
 
 ### WF_Simplify
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  | ✅ | `0x0040` | 64 | Simplified information address set |  |  |  |  |
 | ✅ |  | ✅ | `0x0040` | 64 | Software version (major & minor) | uint16_t |  | Read-only | High 8-bit major version, low 8-bit minor version |
@@ -277,7 +277,7 @@
 
 ### WF_BAT
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x0150` | 336 | Battery information address set |  |  |  |  |
 | ✅ |  |  | `0x0150` | 336 | Battery Type | uint16_t |  | Read-only | 0: Lead-acid battery; 1: Water-filled battery; 2: Ternary lithium battery; 3: Lithium iron phosphate battery; 4: Custom battery. |
@@ -389,7 +389,7 @@
 
 ### WF_LINE
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  | ✅ | `0x01B0` | 432 | Mains power status debugging address set |  |  |  |  |
 | ✅ |  | ✅ | `0x01B0` | 432 | Phase A mains voltage | int16_t | 0.1V | Read-only |  |
@@ -581,7 +581,7 @@
 
 ### WF_PV
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  | ✅ | `0x0260` | 608 | Total photovoltaic address set |  |  |  |  |
 | ✅ |  | ✅ | `0x0260` | 608 | Total photovoltaic voltage | int16_t | 0.1V | Read-only |  |
@@ -725,7 +725,7 @@
 
 ### WF_NTC
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  | ✅ | `0x0330` | 816 | Temperature address set |  |  |  |  |
 | ✅ |  | ✅ | `0x0330` | 816 | PV temperature |  | ℃ | Read-only |  |
@@ -749,7 +749,7 @@
 
 ### WF_FAN
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  | ✅ | `0x0320` | 800 | Fan information address set |  |  |  |  |
 | ✅ |  | ✅ | `0x0320` | 800 | Fan speed |  | % | Read-only |  |
@@ -761,7 +761,7 @@
 
 ### WF_FunctionSwitch
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x0350` | 848 | Special function switch address set |  |  |  |  |
 | ✅ |  |  | `0x0350` | 848 | Factory reset function0 H |  | BIT00: Enable SOC... | Read-only |  |
@@ -785,7 +785,7 @@
 
 ### WF_Time
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x0360` | 864 | Time address set |  |  |  |  |
 | ✅ |  |  | `0x0360` | 864 | Year |  |  | Read-only |  |
@@ -801,7 +801,7 @@
 
 ### WF_PARA
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 |  |  |  | `0x0400` | 1024 |  |  |  |  |  |
 |  |  |  | `0x0400` | 1024 |  |  |  |  |  |
@@ -810,7 +810,7 @@
 
 ### WF_Generator
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x2000` | 8192 | Generator status debugging address set |  |  |  |  |
 | ✅ |  |  | `0x2000` | 8192 | Phase A generator voltage | int16_t | 0.1V | Read-only |  |
@@ -834,7 +834,7 @@
 
 ### WF_Admin
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x1000` | 4096 | Settings & Configuration |  |  |  |  |
 | ✅ |  |  | `0x1000` | 4096 | Factory reset |  |  | Reading and writing | Write 1 to restore to customer customization |
@@ -1182,7 +1182,7 @@
 
 ### WF_UserSet
 
-| Initial Loger query | Regular Loger query | ✅ | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
+| Initial Loger query | Regular Loger query | My Loger query | Hex | Dec | Назва | Тип | Одиниця | Дозвіл | Примітки |
 |---|---|----|-----|-----|-------|-----|---------|--------|----------|
 | ✅ |  |  | `0x4100` | 16640 | User Settings |  |  |  | Note: This setting field can only be set with one parameter at a time. The host computer must ensure the accuracy of the data r... |
 | ✅ |  |  | `0x4100` | 16640 | Output voltage | uint16_t | / | Reading and writing | 0:208V 1:220V 2:230V 3:240V |

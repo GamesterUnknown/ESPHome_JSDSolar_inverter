@@ -20,7 +20,8 @@ Inverter Models with internal wifi loger do not have DC voltage on "USB" port. I
 ![Communication board without logger](pics/com_board_no_internal_loger.jpg)  
 ![Communication board with logger](pics/com_board_with_internal_loger.jpg)  
 
-2) Inverter Models with internal wifi loger use WT32-S3-Wrover modules connected internally, you can flash it instead of  external ESP32-S3. it is recomended to dump original firmware prior to flashing ESPHome firmware. 
+2) Inverter Models with internal wifi loger use WT32-S3-Wrover modules connected internally, you can flash it instead of  external ESP32-S3. it is recomended to dump original firmware prior to flashing ESPHome firmware. it is needed to put GPIO0 to GND to start download/flash wirmware. it is needed USB to TTL adapter to download/flash wirmware.
+
 there are 2 connectors on T32-S3-Wrover logger board:
 
 - CN7900- HY2.0 6PIN - for upload firmware
@@ -29,7 +30,7 @@ there are 2 connectors on T32-S3-Wrover logger board:
   - 3-EN
   - 4-TX
   - 5-RX
-  - 6-GPIO0 (it is needed to put high to start flash wirmware)
+  - 6-GPIO0 (it is needed to put LOW to start flash wirmware)
 
 - CN7901- HY2.0 5PIN - for serial comunications with invertor TTL level signals
   - 1-GPIO39 as a TX
