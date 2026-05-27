@@ -1,5 +1,5 @@
 ###############################################################################
-# ESPHome configuration for JSD Solar 3KU Inverter – Modbus RTU logger
+# ESPHome configuration for JSD Solar Inverter – Modbus RTU logger
 # Register source: INV-Modbus地址表3KU（外发）V1.20.xlsx
 #
 # Hardware:  ESP32 + RS232 TTL adapter
@@ -14,15 +14,30 @@ substitutions:
   device_description: "JSDSolar Inverter 12kW"
   modbus_id: "1"            # Modbus device address
   update_interval: "10s"    # How often to poll sensors
-  skip_times: 6  # Energy counters – less frequent
-  skip_times2: 360
+  skip_times: 1  # Setting registers
+  skip_times2: 360 #Static info registers
+  skip_times3: 6  # Energy counters
   safe_mode_delay: "60s"
 
-  func_int_to_time: |-
-    uint8_t hours = raw / 100;
-    uint8_t minutes = raw - (hours * 100);
-    return ESPTime {.minute = minutes, .hour = hours};
-  func_time_to_int: "return x.hour * 100 + x.minute;"
+# For 48V invertors
+  bat_low_volt_min: 41.2
+  bat_low_volt_max: 54
+  bat_shutdown_volt_min: 40
+  bat_shutdown_volt_max: 48
+  bat_bulk_volt_min: 48
+  bat_bulk_volt_max: 60
+  bat_float_volt_min: 48
+  bat_float_volt_max: 60
+
+# For 24V invertors
+#  bat_low_volt_min: 20.6
+#  bat_low_volt_max: 27
+#  bat_shutdown_volt_min: 20
+#  bat_shutdown_volt_max: 24
+#  bat_bulk_volt_min: 24
+#  bat_bulk_volt_max: 30
+#  bat_float_volt_min: 24
+#  bat_float_volt_max: 30
 
 esphome:
   name: ${device_name}
@@ -33,6 +48,16 @@ esp32:
   framework:
     type: esp-idf
 
+globals:
+  - id: time_synced
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+time:
+  - platform: homeassistant
+    id: s_time
+
 # ── WiFi ──────────────────────────────────────────────────────────────────────
 wifi:
   ssid: !secret wifi_ssid
@@ -40,6 +65,17 @@ wifi:
   ap:
     ssid: "${friendly_name} Hotspot"
     password: !secret ap_password
+  on_connect:
+    then:
+      - number.set:
+          id: inverter_wifi_status
+          value: 3 # Connected to WIFI
+        
+  on_disconnect:
+    then:
+      - number.set:
+          id: inverter_wifi_status
+          value: 2 # Disconnected from WIFI
 
 captive_portal:
 
@@ -48,14 +84,113 @@ api:
   encryption:
     key: !secret api_encryption_key
   on_client_disconnected:
-    - delay: ${safe_mode_delay}
-    - if:
+   # - delay: ${safe_mode_delay}
+   # - if:
+   #     condition:
+   #       not: api.connected
+   #     then:
+   - logger.log: "Lost connection to HomeAssistant API"
+   - if:
         condition:
-          not: api.connected
+          - wifi.connected # Перевіряємо статус Wi-Fi
         then:
-          - logger.log: "Lost connection to HomeAssistant API - Activating safe mode"
+          # HA is down WIFI is up
+          - number.set:
+              id: inverter_wifi_status
+              value:  3
+        else:
+          # WIFI is down, reconnecting
+          - number.set:
+              id: inverter_wifi_status
+              value: 2
   on_client_connected:
-    - logger.log: "Connection to HomeAssistant API restored"
+    then:
+      - number.set:
+          id: inverter_wifi_status
+          value: 4 # Connected to HA
+      #- delay: 5s # Wait for time synchronization with HA server
+      - lambda: |-
+          if (id(time_synced)) return; // Skip if already synchronized after boot
+
+          auto t = id(s_time).now();
+          if (t.is_valid()) {
+            std::vector<uint16_t> time_packet = {
+              (uint16_t)t.second, (uint16_t)t.minute, (uint16_t)t.hour,
+              (uint16_t)t.day_of_month, (uint16_t)t.month, (uint16_t)(t.year - 2000)
+            };
+            
+            auto cmd = esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
+                id(inverter), 16692, 6, time_packet
+            );
+            id(inverter)->queue_command(cmd);
+            
+            id(time_synced) = true; // Lock further automatic synchronization requests
+            ESP_LOGI("modbus_time", "Initial automatic time synchronization successful.");
+          } else {
+            ESP_LOGW("modbus_time", "Automatic sync postponed: HA time source is invalid.");
+          }
+
+interval:
+  - interval: 15s
+    then:
+      - lambda: |-
+          int new_state = 2; // За замовчуванням — Статус 2 (Connecting)
+          
+          // 1. ПРАВИЛЬНА ПЕРЕВІРКА API: використовуємо правильний простір імен api::
+          if (api::global_api_server != nullptr && api::global_api_server->is_connected()) { 
+            new_state = 4;
+          // 2. Пряма перевірка активності власної резервної AP плати
+          } else if (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_ap_active()) { 
+            new_state = 1;
+          // 3. Пряма перевірка підключення до вашого роутера
+          } else if (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected()) { 
+            new_state = 3;
+          }
+
+          // ЗАХИСТ ВІД Unknown (0): якщо сенсор порожній (NAN), миттєво відновлюємо його
+          if (std::isnan(id(inverter_wifi_status).state)) {
+            id(inverter_wifi_status).publish_state(new_state);
+            return;
+          }
+
+          // Оновлюємо повзунок ТІЛЬКИ якщо вирахуваний new_state дійсно змінився
+          if ((int)id(inverter_wifi_status).state != new_state) {
+            auto call = id(inverter_wifi_status).make_call();
+            call.set_value(new_state);
+            call.perform();
+            ESP_LOGD("custom", "Wi-Fi status changed to %d. Sensor updated.", new_state);
+          }
+
+#interval:
+#  - interval: 60s
+#    then:
+#      - if:
+#          condition:
+#            - api.connected
+#          then:
+#            - number.set:
+#                id: inverter_wifi_status
+#                value: 4 # HA Connected
+#          else:
+#            - if:
+#                condition:
+#                  - wifi.ap_active 
+#                then:
+#                  - number.set:
+#                      id: inverter_wifi_status
+#                      value: 1 # AP active no WIFI
+#                else:
+#                  - if:
+#                      condition:
+#                        - wifi.connected
+#                      then:
+#                        - number.set:
+#                            id: inverter_wifi_status
+#                            value: 3 # WIFI connected
+#                      else:
+#                        - number.set:
+#                            id: inverter_wifi_status
+#                            value: 2 # Connecting to WIFI
 
 ota:
   - platform: esphome
@@ -68,7 +203,7 @@ web_server:
 
 # ── Logger ────────────────────────────────────────────────────────────────────
 logger:
-  level: INFO # VERBOSE / DEBUG / INFO / WARN
+  level: DEBUG # VERBOSE / DEBUG / INFO / WARN
   id: uart_logger
   baud_rate: 0
   logs:
@@ -79,11 +214,11 @@ logger:
     text_sensor: INFO
     binary_sensor: INFO
     number: INFO
-    modbus_controller: INFO
+    modbus_controller: DEBUG
     modbus_controller.sensor: WARN
     modbus_controller.binary_sensor: WARN
     component: ERROR            # Suppress slow-component warnings
-    uart: INFO
+    uart: DEBUG
 
 # ── UART (RS-232 adapter) ─────────────────────────────────────────────────────
 uart:
@@ -103,10 +238,6 @@ uart:
  #    sequence:
  #     - lambda: UARTDebug::log_string(direction, bytes);
 
-  # Uncomment to debug raw bytes:
-  # debug:
-  #   direction: BOTH
-  #   dummy_receiver: false
 
 # ── Modbus ────────────────────────────────────────────────────────────────────
 modbus:
@@ -128,7 +259,22 @@ modbus_controller:
 #  SENSORS
 # ===========================================================================
 sensor:
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} TEST MPPT Reg 16718"
+    register_type: holding
+    address: 16718
+    value_type: U_WORD
+    skip_updates: ${skip_times}
 
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "${friendly_name} TEST MPPT Reg 16717"
+    register_type: holding
+    address: 16716 # 0x4126
+    value_type: U_WORD
+    skip_updates: ${skip_times}
+  
   # ── Uptime / WiFi diagnostics ──────────────────────────────────────────────
   - platform: uptime
     name: "${friendly_name} Uptime"
@@ -461,7 +607,7 @@ sensor:
     device_class: energy
     state_class: total_increasing
     accuracy_decimals: 2
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
     filters:
       - multiply: 0.1       # 100Wh → 0.1 kWh per unit
     
@@ -476,7 +622,7 @@ sensor:
     device_class: energy
     state_class: total_increasing
     accuracy_decimals: 2
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
     filters:
       - multiply: 0.1
 
@@ -493,6 +639,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
     value_type: S_WORD
+    filters:
+      - multiply: 0.1
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -505,6 +653,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
     value_type: S_WORD
+    filters:
+      - multiply: 0.1
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -517,6 +667,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
     value_type: S_WORD
+    filters:
+      - multiply: 0.1
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -529,6 +681,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
     value_type: S_WORD
+    filters:
+      - multiply: 0.1
 
   # ── Fan ───────────────────────────────────────────────────────────────────
   - platform: modbus_controller
@@ -717,7 +871,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01       # 10Wh → kWh
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -733,7 +887,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -749,7 +903,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -765,7 +919,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -781,7 +935,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -797,7 +951,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -813,7 +967,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -829,7 +983,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   # ── WF_OP – Output energy counters (32-bit H+L pairs, unit = 10 Wh) ──────────
   - platform: modbus_controller
@@ -846,7 +1000,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -862,7 +1016,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -878,7 +1032,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -894,7 +1048,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   # ── WF_PV – Total PV current & power (additional) ─────────────────────────────
   - platform: modbus_controller
@@ -949,7 +1103,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -965,7 +1119,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -981,7 +1135,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -997,7 +1151,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   # ── WF_PV – PV1 detailed block ────────────────────────────────────────────────
   - platform: modbus_controller
@@ -1036,7 +1190,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1052,7 +1206,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1068,7 +1222,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -1084,7 +1238,7 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
-    skip_updates: ${skip_times}
+    skip_updates: ${skip_times3}
 
   # ── WF_Simplify – Additional registers ────────────────────────────────────────
   - platform: modbus_controller
@@ -1218,13 +1372,496 @@ sensor:
     accuracy_decimals: 0
     value_type: S_WORD
 
+# ── WF_UserSet – User Settings ────────────────────────────────────────────
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_sec
+    address: 16692
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_min
+    address: 16693
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_hour
+    address: 16694
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_day
+    address: 16695
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_month
+    address: 16696
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inv_read_year
+    address: 16697
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+# ===========================================================================
+#  NUMBER SENSORS  – derived from settings registers
+# ===========================================================================
+
+number:
+  # ── Battery Low Voltage (V)  x10 ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bat_low_volt
+    name: "${friendly_name} Menu 18: Battery Low Voltage Alert"
+    register_type: holding
+    use_write_multiple: true
+    address: 16648 # 0x4108
+    value_type: U_WORD
+    min_value: ${bat_low_volt_min}
+    max_value: ${bat_low_volt_max}
+    step: 0.1
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}
+    multiply: 10 
+    mode: box
+
+  # ── Battery Shutdown Voltage (V)  x10 ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bat_shutdown_volt
+    name: "${friendly_name} Menu 19: Battery Shutdown Voltage"
+    register_type: holding
+    use_write_multiple: true
+    address: 16649 # 0x4109
+    value_type: U_WORD
+    min_value: ${bat_shutdown_volt_min}
+    max_value: ${bat_shutdown_volt_max}
+    step: 0.1
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}
+    multiply: 10
+    mode: box
+
+  # ── Battery Bulk Charging Voltage (V)  x10 ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bat_bulk_volt
+    name: "${friendly_name} Menu 20: Bulk Charging Voltage"
+    register_type: holding
+    use_write_multiple: true
+    address: 16650 # 0x410A
+    value_type: U_WORD
+    min_value: ${bat_bulk_volt_min}
+    max_value: ${bat_bulk_volt_max}
+    step: 0.1
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}
+    multiply: 10
+    mode: box
+  
+  # ── Battery Float Charging Voltage (V)  x10 ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bat_float_volt
+    name: "${friendly_name} Menu 21: Float Charging Voltage"
+    register_type: holding
+    use_write_multiple: true
+    address: 16651 # 0x410B
+    value_type: U_WORD
+    min_value: ${bat_float_volt_min}
+    max_value: ${bat_float_volt_max}
+    step: 0.1
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}
+    multiply: 10
+    mode: box
+    
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    icon: "mdi:lightning-bolt-outline"
+    id: set_grid_low_voltage
+    name: "${friendly_name} Menu 22: Grid Low Voltage Limit"
+    register_type: holding
+    use_write_multiple: true
+    address: 16654 # 0x410E
+    value_type: U_WORD
+    min_value: 90.0 
+    max_value: 200.0
+    step: 1.0       
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}
+    mode: box 
+    lambda: |-
+      // При старте, пока данные не вычитаны — возвращаем ваш дефолт 255
+      int current_mode = (int)id(set_operating_mode).active_index().value_or(255);
+      auto *num = id(set_grid_low_voltage);
+
+      if (current_mode == 1) {
+        // КЕЙС 1: Режим 1 (UPS) -> границы 170V - 200V
+        num->traits.set_min_value(170.0f);
+        num->traits.set_max_value(200.0f);
+      } 
+      else if (current_mode == 0 || current_mode == 2) {
+        // КЕЙС 2: Режимы 0 и 2 -> границы 90V - 154V
+        num->traits.set_min_value(90.0f);
+        num->traits.set_max_value(154.0f);
+      } 
+      else {
+        // КЕЙС 3: Для всего остального (Режим 3, или дефолт 255 при старте) -> границы 90V - 200V
+        num->traits.set_min_value(90.0f);
+        num->traits.set_max_value(200.0f);
+      }
+      
+      return x;     
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    icon: "mdi:lightning-bolt"
+    id: set_grid_high_voltage
+    name: "${friendly_name} Menu 23: Grid High Voltage Limit"
+    register_type: holding
+    use_write_multiple: true
+    address: 16655 # 0x410F
+    value_type: U_WORD
+    min_value: 264.0
+    max_value: 280.0
+    step: 1.0
+    unit_of_measurement: "V"
+    skip_updates: ${skip_times}  
+    mode: box
+    lambda: |-
+      int current_mode = (int)id(set_operating_mode).active_index().value_or(255);
+      auto *num = id(set_grid_high_voltage);
+      
+      if (current_mode == 1) {
+        //  UPS
+        num->traits.set_max_value(264.0f);
+      } 
+      else {
+        // APP / GEN
+        num->traits.set_max_value(280.0f);
+      }
+      return x;
+      
+  # ── Menu 38: Dual output cutoff voltage"
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_dual_output_cutoff_voltage
+    name: "${friendly_name} Menu 38: Dual output cutoff voltage"
+    address: 16664 # 0x4118
+    value_type: U_WORD
+    use_write_multiple: true 
+    skip_updates: ${skip_times}
+    entity_category: config
+    icon: "mdi:battery-alert"
+    mode: box 
+    min_value: 44.0
+    max_value: 60.0
+    step: 0.1
+    unit_of_measurement: "V"
+    multiply: 10 
+
+# ── Menu 39: Dual output timer" use register 16665 # 0x4119
+  - platform: template
+    id: set_dual_output_minutes
+    name: "${friendly_name} Menu 39: Dual output timer"
+    entity_category: config
+    icon: "mdi:clock-alert-outline"
+    mode: box
+    min_value: 5
+    max_value: 900
+    step: 1
+    unit_of_measurement: "min"
+    optimistic: true
+ #   lambda: |-
+ #     int raw_val = (int)id(set_dual_output_mode).active_index().value_or(0);
+ #     if (raw_val >= 5 && raw_val <= 900) {
+ #       return (float)raw_val;
+ #     }
+    on_value:
+      then:
+        - select.set: 
+            id: set_dual_output_mode
+            option: "Timer"
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_feeder_power_limit
+    name: "${friendly_name} Menu 37: Grid Tie Power Limit"
+    register_type: holding
+    address: 16687 # 0x412F
+    value_type: U_WORD
+    min_value: 0.0
+    max_value: 12.0
+    step: 0.5
+    unit_of_measurement: "kW"
+    icon: "mdi:transmission-tower-export"
+    mode: box
+    multiply: 10
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+
+  # ── WIFI status ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: inverter_wifi_status
+    address: 16707
+    register_type: holding
+    value_type: U_WORD
+    min_value: 1
+    max_value: 255
+    step: 1
+    internal: true
+    use_write_multiple: true
+
+# ===========================================================================
+#  NUMBER SENSORS  – time setting for different inverter behaviour. Use on own risk!!!!! 
+# ===========================================================================
+
+  # # ── Регістри розкладу живлення від мережі (Power Supply) ───────────────────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_power_supply_time_1
+#     name: "${friendly_name} Power Supply Time 1"
+#     register_type: holding
+#     address: 16698 # 0x413A
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-start"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_power_supply_time_2
+#     name: "${friendly_name} Power Supply Time 2"
+#     register_type: holding
+#     address: 16700 # 0x413C
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-end"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   # ── Регістри розкладу експорту / продажу (Selling electricity) ────────────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_selling_time_1
+#     name: "${friendly_name} Selling Electricity Time 1"
+#     register_type: holding
+#     address: 16699 # 0x413B
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-fast"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_selling_time_2
+#     name: "${friendly_name} Selling Electricity Time 2"
+#     register_type: holding
+#     address: 16701 # 0x413D
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-out"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   # ── Регістри розкладу роботи силової частини (Power On / Off) ──────────────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_inverter_power_on_time
+#     name: "${friendly_name} Inverter Power On Time"
+#     register_type: holding
+#     address: 16702 # 0x413E
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:timer-sand-complete"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_inverter_power_off_time
+#     name: "${friendly_name} Inverter Power Off Time"
+#     register_type: holding
+#     address: 16703 # 0x413F
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:timer-sand-empty"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#    # ── Регістр 16708: Час увімкнення першого ліміту віддачі (0-23 год) ───────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_feeder_time_1
+#     name: "${friendly_name} Grid Tie Power Time 1"
+#     register_type: holding
+#     address: 16708 # 0x4144
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-start"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   # ── Регістр 16709: Час увімкнення другого ліміту віддачі (0-23 год) ───────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_feeder_time_2
+#     name: "${friendly_name} Grid Tie Power Time 2"
+#     register_type: holding
+#     address: 16709 # 0x4145
+#     value_type: U_WORD
+#     min_value: 0
+#     max_value: 23
+#     step: 1
+#     unit_of_measurement: "h"
+#     icon: "mdi:clock-end"
+#     mode: box
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   # ── Регістр 16710: Ліміт потужності для періоду 1 (0-12 kW) ──────────────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_feeder_power_1
+#     name: "${friendly_name} Grid Tie Power Limit 1"
+#     register_type: holding
+#     address: 16710 # 0x4146
+#     value_type: U_WORD
+#     min_value: 0.0
+#     max_value: 12.0
+#     step: 0.1
+#     unit_of_measurement: "kW"
+#     icon: "mdi:transmission-tower-export"
+#     mode: box
+#     multiply: 10
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+# 
+#   # ── Регістр 16711: Ліміт потужності для періоду 2 (0-12 kW) ──────────────
+#   - platform: modbus_controller
+#     modbus_controller_id: inverter
+#     id: set_feeder_power_2
+#     name: "${friendly_name} Grid Tie Power Limit 2"
+#     register_type: holding
+#     address: 16711 # 0x4147
+#     value_type: U_WORD
+#     min_value: 0.0
+#     max_value: 12.0
+#     step: 0.1
+#     unit_of_measurement: "kW"
+#     icon: "mdi:transmission-tower-export"
+#     mode: box
+#     multiply: 10
+#     use_write_multiple: true
+#     skip_updates: ${skip_times}
+
+
 # ===========================================================================
 #  TEXT SENSORS  – status / fault codes
 # ===========================================================================
 text_sensor:
+  - platform: template
+    name: "${friendly_name} Inverter Current Time"
+    id: inverter_current_time
+    icon: "mdi:clock-select-less"
+    update_interval: 5s
+    lambda: |-
+
+      if (!id(inv_read_hour).has_state()  || 
+       !id(inv_read_min).has_state()   || 
+       !id(inv_read_sec).has_state()   || 
+       !id(inv_read_day).has_state()   || 
+       !id(inv_read_month).has_state() || 
+       !id(inv_read_year).has_state()) {
+       return {"Waiting for Modbus data..."};
+      }
+
+      int sec = (int)id(inv_read_sec).state;
+      int min = (int)id(inv_read_min).state;
+      int hour = (int)id(inv_read_hour).state;
+      int day = (int)id(inv_read_day).state;
+      int month = (int)id(inv_read_month).state;
+      
+
+      if (hour > 23 || min > 59 || sec > 59 || hour < 0 || min < 0 || sec < 0) {
+        return {"Time Data Error"};
+      }
+
+
+      int year = (int)id(inv_read_year).state;
+      if (year < 100) {
+        year += 2000;
+      }
+      return esphome::str_sprintf("%02d:%02d:%02d  %02d.%02d.%04d", hour, min, sec, day, month, year);
+      
   - platform: wifi_info
     ip_address:
       name: "${friendly_name} IP Address"
+
+  - platform: template
+    name: "${friendly_name} WiFi Connection status"
+    icon: "mdi:wifi"
+    lambda: |- 
+      int status_code = (int)id(inverter_wifi_status).state;
+      
+      switch(status_code) {
+        case 1:  return {"WIFI AP active"};
+        case 2:  return {"Connecting to WIFI"};
+        case 3:  return {"Connected to WIFI"};
+        case 4:  return {"Connected to HA"};
+        default: 
+          return esphome::str_sprintf("Unknown (%d)", status_code);
+      }
 
   # ── Startup-only: SN code (read once, 10 registers = 20 bytes ASCII) ─────────
   - platform: modbus_controller
@@ -1576,3 +2213,645 @@ binary_sensor:
     register_type: holding
     address: 0x008F         # DEC 143 – BMS communication status
     bitmask: 0xFFFF
+
+# ===========================================================================
+#  SELECT SENSORS – derived from settings registers
+# ===========================================================================
+
+select:
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_output_voltage
+    name: "${friendly_name} Menu 01: Output Voltage"
+    entity_category: config
+    address: 16640 # 0x4100
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+    #  "208V": 0
+      "220V": 1
+      "230V": 2
+      "240V": 3
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_output_freq
+    name: "${friendly_name} Menu 02: Output Frequency"
+    entity_category: config
+    address: 16641 # 0x4101
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "50Hz": 0
+      "60Hz": 1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_output_priority
+    name: "${friendly_name} Menu 03: Output Priority"
+    entity_category: config
+    address: 16642 # 0x4102
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "GPB (Grid-PV-Battery)": 0
+      "PGB (PV-Grid-Battery)": 1
+      "PBG (PV-Battery-Grid)": 2
+      "MKS Mode": 3
+  
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_operating_mode
+    name: "${friendly_name} Menu 04: Operating Mode"
+    entity_category: config
+    address: 16643 # 0x4103
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    # Згідно з таблицею: 0:APP, 1:UPS
+    optionsmap:
+      "APP": 0
+      "UPS": 1
+      "GEN": 2
+    on_value:
+      then:
+        - lambda: |-
+            int current_mode = (int)id(set_operating_mode).active_index().value_or(255);
+            auto *low_num = id(set_grid_low_voltage);
+            auto *high_num = id(set_grid_high_voltage);
+
+            if (current_mode == 1) {
+              // ---  UPS ---
+              low_num->traits.set_min_value(170.0f);
+              low_num->traits.set_max_value(200.0f);
+              if (low_num->state < 170.0f || low_num->state > 200.0f) low_num->publish_state(185.0f);
+              high_num->traits.set_max_value(264.0f);
+              if (high_num->state != 264.0f) high_num->publish_state(264.0f);
+            } 
+            else if (current_mode == 0 || current_mode == 2) {
+              // ---  APP / GEN ---
+              low_num->traits.set_min_value(90.0f);
+              low_num->traits.set_max_value(154.0f);
+              if (low_num->state < 90.0f || low_num->state > 154.0f) low_num->publish_state(154.0f);
+              high_num->traits.set_max_value(280.0f);
+             // if (high_num->state < 264.0f || high_num->state > 280.0f) high_num->publish_state(270.0f);
+            } 
+            else {
+              // ---  ---
+              low_num->traits.set_min_value(90.0f);
+              low_num->traits.set_max_value(200.0f);             
+              high_num->traits.set_max_value(280.0f);
+            }            
+            low_num->publish_state(low_num->state);
+            high_num->publish_state(high_num->state);
+          
+
+  # ── Charging priority ─────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_charging_priority
+    name: "${friendly_name} Menu 05: Charging Priority"
+    entity_category: config
+    address: 16644 # 0x4104
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "PNG (PV & Grid)": 0
+      "OPV (Only PV)": 1
+      "PVF (PV First)": 2
+
+    # ── AC Charging Current (A) ─────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_ac_char_curr
+    name: "${friendly_name} Menu 06: AC Charging Current"
+    entity_category: config
+    address: 16645 # 0x4105
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "2A": 2
+      "10A": 10
+      "20A": 20
+      "30A": 30
+      "40A": 40
+      "50A": 50
+      "60A": 60
+      "70A": 70
+      "80A": 80
+      "90A": 90
+      "100A": 100
+      "110A": 110
+      "120A": 120
+
+  # ── Max Charging Current ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_max_char_curr
+    name: "${friendly_name} Menu 07: Max Charging Current"
+    entity_category: config
+    address: 16646 # 0x4106
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "2A": 0
+      "10A": 1  
+      "20A": 2
+      "30A": 3
+      "40A": 4
+      "50A": 5
+      "60A": 6
+      "70A": 7
+      "80A": 8
+      "90A": 9
+      "100A": 10
+      "110A": 11
+      "120A": 12
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bat_type
+    name: "${friendly_name} Menu 17: Battery Type"
+    entity_category: config
+    address: 16647 # 0x4107
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "AGM": 0
+      "Flooded": 1
+      "Lithium": 2
+      "LiFePO4": 3
+      "User-Defined": 4
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_dual_output_mode
+    name: "${friendly_name} Menu 39: Dual output Duration"
+    address: 16665 # 0x4119
+    value_type: U_WORD
+    skip_updates: ${skip_times}
+    entity_category: config
+    icon: "mdi:layers-triple-outline" 
+    optimistic: true
+    use_write_multiple: true
+    optionsmap:
+      "Disabled": 65521
+      "Unlimited Time": 65522
+      "Timer": 900
+    lambda: |-
+      if (x >= 5 && x <= 900) {
+        id(set_dual_output_minutes).publish_state(x);
+        return std::string("Timer");
+      }
+      return {}; 
+
+    write_lambda: |-
+      if (x == "Timer") {
+        float current_state = id(set_dual_output_minutes).state;       
+        uint16_t mins = std::isnan(current_state) ? 900 : (uint16_t)current_state;
+        if (mins < 5)   mins = 5;
+        if (mins > 900) mins = 900;       
+        return mins; 
+      }
+      return value;
+
+    on_value:
+      then:
+        - lambda: |-
+            int raw_val = (int)id(set_dual_output_mode).active_index().value_or(65521);
+            if (raw_val >= 5 && raw_val <= 900) {
+              id(set_dual_output_minutes).publish_state(raw_val);
+            }
+
+   # ── Menu 44: BMS Protocol Selection ────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bms_protocol
+    name: "${friendly_name} Menu 44: BMS Communication Protocol" 
+    entity_category: config
+    address: 16670 # 0x411E
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF:Disable": 0
+      "CVT:CVTE (485)": 1
+      "GRO:GROWATT (485 & CAN)": 2 
+      "VOL:VOLTRONIC (485)": 3
+      "PYL:PYLON (485 & CAN)": 4
+      "IRO:China Tower (485)": 5
+      "PAC:PACE RTU (485)": 6
+  
+  # ── Menu 45: BMS ID Selection ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bms_id
+    name: "${friendly_name} Menu 45: BMS ID"
+    entity_category: config
+    address: 16671 # 0x411F
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "ID: self-search (Auto)": 65521 # 0xFFF1
+      "ID: 0": 0
+      "ID: 1": 1
+      "ID: 2": 2
+      "ID: 3": 3
+      "ID: 4": 4
+      "ID: 5": 5
+      "ID: 6": 6
+      "ID: 7": 7
+      "ID: 8": 8
+      "ID: 9": 9
+      "ID: 10": 10
+      "ID: 11": 11
+      "ID: 12": 12
+      "ID: 13": 13
+      "ID: 14": 14
+      "ID: 15": 15
+
+  # ── Menu 46: SOC Shutdown ──────────
+ 
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bms_shutdown_soc
+    name: "${friendly_name} Menu 46: Low SOC Shutdown"
+    entity_category: config
+    address: 16672 # 0x4120
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 65521 # 0xFFF1 (Low SOC shutdown function for disabled users)
+      "5%": 5
+      "10%": 10
+      "15%": 15
+      "20%": 20
+      "25%": 25
+      "30%": 30
+      "35%": 35
+      "40%": 40
+      "45%": 45
+      "50%": 50
+
+  # ── Menu 47: High SOC to Battery ───
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bms_power_off_soc
+    name: "${friendly_name} Menu 47: High SOC to Battery"
+    entity_category: config
+    address: 16673 # 0x4121
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 65521 # 0xFFF1 (Power-off SOC to Battery Function Disabled)
+      "10%": 10
+      "20%": 20
+      "30%": 30
+      "40%": 40
+      "50%": 50
+      "60%": 60
+      "70%": 70
+      "80%": 80
+      "90%": 90
+
+  # ── Menu 48: Low SOC to Grid ────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_bms_switch_to_ac_soc
+    name: "${friendly_name} Menu 48: Low SOC to Grid"
+    entity_category: config
+    address: 16674 # 0x4122
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 65521 # 0xFFF1 (Disabled SOC to AC power function)
+      "10%": 10
+      "20%": 20
+      "30%": 30
+      "40%": 40
+      "50%": 50
+      "60%": 60
+      "70%": 70
+      "80%": 80
+      "90%": 90
+      "100%": 100
+  
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_remote_power_control
+    name: "${friendly_name} Menu 65: Remote Power On-Off"
+    entity_category: config
+    address: 16675 # 0x4123
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}  
+    optionsmap:
+      "Disabled": 0
+      "Power ON": 1
+      "Power OFF": 2
+
+    # ── Menu XX: Turn off charging ──────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_turn_off_charging
+    name: "${friendly_name} Menu 64: Turn off charging"
+    entity_category: config
+    address: 16676 # 0x4124
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 24: Automatic turn off backlight ───────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_backlight_self_ext
+    name: "${friendly_name} Menu 24: Automatic turn off backlight"
+    entity_category: config
+    address: 16677 # 0x4125
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF (Always on)": 0
+      "ON (Auto turn off)": 1
+
+  # ── Menu 10: Overheating restart ─────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_overheating_restart
+    name: "${friendly_name} Menu 10: Overheating restart"
+    entity_category: config
+    address: 16679 # 0x4127
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 09: Overload restart ─────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_overload_restart
+    name: "${friendly_name} Menu 09: Overload restart"
+    entity_category: config
+    address: 16680 # 0x4128
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 13: Overload bypass  ───
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_overload_bypass
+    name: "${friendly_name} Menu 13: Overload bypass"
+    entity_category: config
+    address: 16681 # 0x4129
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 12: Energy Saving (Low power consumption and energy saving)
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_low_power_saving
+    name: "${friendly_name} Menu 12: Energy Saving"
+    entity_category: config
+    address: 16682 # 0x412A
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Automatic detection of mains frequency
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_auto_mains_freq_detect
+    name: "${friendly_name} Menu 63: Automatic detection of mains frequency"
+    entity_category: config
+    address: 16683 # 0x412B
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 25: Inverter soft start
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_soft_starter_active
+    name: "${friendly_name} Menu 25: Inverter soft start"
+    entity_category: config
+    address: 16684 # 0x412C
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Battery open circuit warning
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_bat_open_circuit_warning
+    name: "${friendly_name} Menu 29: Battery Disconnect Alarm"
+    entity_category: config
+    address: 16685 # 0x412D
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_feeder_function
+    name: "${friendly_name} Menu 36: Grid-tie Function"
+    entity_category: config
+    address: 16686 # 0x412E
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "INT": 1
+      "MET": 2
+
+  # ── Menu 14: Silent Mode ──────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_buzzer_muted
+    name: "${friendly_name} Menu 14: Silent Mode"
+    entity_category: config
+    address: 16688 # 0x4130
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Menu 08: Return to Default screen" ─────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_fault_return_main
+    name: "${friendly_name} Menu 08: Return to Default screen"
+    entity_category: config
+    address: 16689 # 0x4131
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+  
+  # ── Регистр 16690: Уведомление об изменении основного входа ───────────────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_warning_main_input_change
+    name: "${friendly_name} Menu 11: Warning of main input change"
+    entity_category: config
+    address: 16690 # 0x4132
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times} 
+    optionsmap:
+      "OFF": 0
+      "ON": 1
+
+  # ── Регистр 16691: Сброс к заводским настройкам (Критическое меню) ───────────
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: sel_restore_default_settings
+    name: "${friendly_name} Menu 26: Restore default settings"
+    entity_category: config
+    address: 16691 # 0x4133
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF (Normal Operation)": 0
+      "ON (FACTORY RESET)": 1
+
+  # ── Battery Maximum discharge current ──
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_max_discharge_current
+    name: "${friendly_name} Menu 61: Battery Max Discharge Current"
+    entity_category: config
+    address: 16706 # 0x4142
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}   
+    optionsmap:
+      "OFF": 65521 # 0xFFF1
+      "10A": 0
+      "15A": 1
+      "20A": 2
+      "25A": 3
+      "30A": 4
+      "35A": 5
+      "40A": 6
+      "45A": 7
+      "50A": 8
+      "55A": 9
+      "60A": 10
+      "65A": 11
+      "70A": 12
+      "75A": 13
+      "80A": 14
+      "85A": 15
+      "90A": 16
+      "95A": 17
+      "100A": 18
+      "105A": 19
+      "110A": 20
+      "115A": 21
+      "120A": 22 # Max for VML1K2
+      "125A": 23
+      "130A": 24
+      "135A": 25
+      "140A": 26 # Max for VMH6KU
+      "145A": 27
+      "150A": 28
+      "155A": 29
+      "160A": 30 # Max for VMH5KU
+      "165A": 31
+      "170A": 32
+      "175A": 33
+      "180A": 34
+      "185A": 35
+      "190A": 36
+      "195A": 37
+      "200A": 38
+      "205A": 39
+      "210A": 40
+      "215A": 41
+      "220A": 42 # Max for VMH12KU
+  
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    id: set_pv_parallel_mode
+    name: "${friendly_name} Menu 62: PV Parallel Mode"
+    entity_category: config
+    address: 16719 # 0x414F
+    value_type: U_WORD
+    optimistic: true
+    use_write_multiple: true
+    skip_updates: ${skip_times}
+    optionsmap:
+      "OFF:(Dual MPPT)": 0
+      "ON:(Single MPPT)": 1
